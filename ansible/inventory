@@ -1,0 +1,3 @@
+master ansible_host=10.211.55.16 ansible_user=user ansible_password=P@ssw0rd
+replica ansible_host=10.211.55.15 ansible_user=user ansible_password=P@ssw0rd
+tg_bot ansible_host=10.211.55.7 ansible_user=user ansible_password=P@ssw0rd

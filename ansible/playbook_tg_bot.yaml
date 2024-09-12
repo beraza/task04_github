@@ -1,0 +1,289 @@
+---
+- name: List contents of the home directory
+  hosts: master
+  become: yes
+  vars_files:
+    - .env
+  vars:
+    postgres_version: "15"
+    postgres_data_dir: /var/lib/postgresql/{{ postgres_version }}/main
+    venv_path: /opt/venv
+
+  tasks: 
+    - name: Install acl for become
+      apt:
+        name:
+          - acl
+        state: present
+        update_cache: yes
+
+    - name: Install PostgreSQL
+      apt:
+        name: "postgresql-{{ postgres_version }}"
+        state: present
+        update_cache: yes
+
+    - name: Ensure PostgreSQL is running
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Install psycopg2 dependencies
+      apt:
+        name:
+          - python3-pip
+          - python3-venv
+          - python3-psycopg2
+          - libpq-dev
+        state: present
+        update_cache: yes
+    
+    - name: Create a virtual environment
+      command: python3 -m venv {{ venv_path }}
+
+    - name: Install psycopg2 in the virtual environment
+      command: "{{ venv_path }}/bin/pip install psycopg2-binary"
+
+    - name: Set password for postgres user
+      shell: |
+        psql -c "ALTER USER postgres WITH PASSWORD '{{ DB_PASSWORD }}';"
+      become: yes
+      become_user: postgres
+
+    - name: Create application database
+      postgresql_db:
+        login_user: "{{ DB_USER }}"
+        login_host: "localhost"
+        login_password: "{{ DB_PASSWORD }}"
+        name: "{{ DB_DATABASE }}"
+        owner: "{{ DB_USER }}"
+
+    - name: Create test table and insert data
+      postgresql_query:
+        login_user: "{{ DB_USER }}"
+        login_host: "localhost"
+        login_password: "{{ DB_PASSWORD }}"
+        db: "{{ DB_DATABASE }}"
+        query: |
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'emails') THEN
+              CREATE TABLE emails (
+                ID SERIAL PRIMARY KEY,
+                email VARCHAR(100) NOT NULL
+              );
+              INSERT INTO emails (email) VALUES 
+                ('test@test.ru'),
+                ('second_test2@test.ru');
+            END IF;
+            
+            IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'phonenumbers') THEN
+              CREATE TABLE phonenumbers (
+                ID SERIAL PRIMARY KEY,
+                phonenumber VARCHAR(100) NOT NULL
+              );
+              INSERT INTO phonenumbers (phonenumber) VALUES 
+                ('88002253535'),
+                ('+79812223344');
+            END IF;
+          END $$; 
+
+    - name: Configure PostgreSQL for replication
+      block:
+        - name: Ensure PostgreSQL configuration directory exists
+          file:
+            path: "{{ postgres_data_dir }}/"
+            state: directory
+
+        - name: Create new archive directory
+          file:
+            path: "{{ postgres_data_dir }}/archive"
+            state: directory
+            owner: postgres
+            group: postgres
+
+        - name: Set PostgreSQL listen addresses
+          lineinfile:
+            path: /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+            regexp: '^#?listen_addresses'
+            line: "listen_addresses = '*'"
+
+        - name: Set PostgreSQL wal_level
+          lineinfile:
+            path: /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+            regexp: '^#?wal_level'
+            line: "wal_level = replica"
+
+        - name: Set PostgreSQL max_wal_senders
+          lineinfile:
+            path: /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+            regexp: '^#?max_wal_senders'
+            line: "max_wal_senders = 3"
+
+        - name: Set PostgreSQL wal_log_hints
+          lineinfile:
+            path: /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+            regexp: '^#?wal_log_hints'
+            line: "wal_log_hints = on"
+
+        - name: Set PostgreSQL log_replication_commands
+          lineinfile:
+            path: /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+            regexp: '^#?log_replication_commands'
+            line: "log_replication_commands = on"
+
+        - name: Set PostgreSQL archive_mode
+          lineinfile:
+            path: /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+            regexp: '^#?archive_mode'
+            line: "archive_mode = on"
+
+        - name: Set PostgreSQL archive_command
+          lineinfile:
+            path: /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+            regexp: '^#?archive_command'
+            line: "archive_command = 'cp %p /var/lib/postgresql/{{ postgres_version }}/main/archive/%f'"
+
+        - name: Allow replication connections
+          lineinfile:
+            path: /etc/postgresql/{{ postgres_version }}/main/pg_hba.conf
+            line: "host replication {{ DB_REPL_USER }} 0.0.0.0/0 md5"
+            state: present
+
+        - name: Reload PostgreSQL configuration
+          service:
+            name: postgresql
+            state: restarted
+
+        - name: Create replication user
+          postgresql_user:
+            login_user: "{{ DB_USER }}"
+            login_host: "localhost"
+            login_password: "{{ DB_PASSWORD }}"
+            name: "{{ DB_REPL_USER }}"
+            password: "{{ DB_REPL_PASSWORD }}"
+            role_attr_flags: "REPLICATION"
+          environment:
+            PATH: "{{ venv_path }}/bin:{{ ansible_env.PATH }}"
+
+- name: Setup PostgreSQL Replica
+  hosts: replica
+  become: yes
+  vars_files:
+    - .env
+  vars:
+    postgres_data_dir: /var/lib/postgresql/{{ postgres_version }}/main 
+
+  tasks:
+    - name: Install acl for become
+      apt:
+        name:
+          - acl
+        state: present
+        update_cache: yes
+
+    - name: Install PostgreSQL
+      apt:
+        name: "postgresql-{{ postgres_version }}"
+        state: present
+        update_cache: yes
+
+    - name: Ensure PostgreSQL is stopped
+      service:
+        name: postgresql
+        state: stopped
+
+    - name: Remove old data directory
+      file:
+        path: "{{ postgres_data_dir }}"
+        state: absent
+
+    - name: Create new data directory
+      file:
+        path: "{{ postgres_data_dir }}"
+        state: directory
+        owner: postgres
+        group: postgres
+    
+    - name: Set permission on data directory
+      file:
+        path: "{{ postgres_data_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Set PostgreSQL listen addresses
+      lineinfile:
+        path: /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+        regexp: '^#?listen_addresses'
+        line: "listen_addresses = '*'"
+
+    - name: Clone data from master
+      shell: |
+        PGPASSWORD="{{ DB_REPL_PASSWORD }}" pg_basebackup -h {{ DB_HOST }} -D {{ postgres_data_dir }} -U {{ DB_REPL_USER }} -v -P --wal-method=stream
+      become: yes
+      become_user: postgres
+
+    - name: Ensure PostgreSQL is running
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+- name: Setup TG Bot
+  hosts: master
+  become: yes
+  vars_files:
+    - .env
+  vars:
+    postgres_data_dir: /var/lib/postgresql/{{ postgres_version }}/main
+
+  tasks:
+    - name: Install required packages for the bot
+      apt:
+        name:
+          - git
+          - python3
+          - python3-pip
+        state: present
+        update_cache: yes
+
+    - name: Clone bot repository
+      git:
+        repo: "{{ BOT_REPO_URL }}"
+        dest: "/opt/bot_data/"
+        version: docker
+
+    - name: Install bot dependencies
+      pip:
+        requirements: "/opt/bot_data/bot_image/requirements.txt"
+        virtualenv: "/opt/venv"
+
+    - name: Insert environment variables
+      lineinfile:
+        path: /etc/environment
+        create: yes
+        line: "{{ item }}"
+      with_items:
+      - 'TOKEN="{{ TOKEN }}"'
+      - 'RM_HOST="{{ RM_HOST }}"'
+      - 'RM_PORT="{{ RM_PORT }}"'
+      - 'RM_USER="{{ RM_USER }}"'
+      - 'RM_PASSWORD="{{ RM_PASSWORD }}"'
+      - 'DB_USER="{{ DB_USER }}"'
+      - 'DB_PASSWORD="{{ DB_PASSWORD }}"'
+      - 'DB_HOST="{{ DB_HOST }}"'
+      - 'DB_PORT="{{ DB_PORT }}"'
+      - 'DB_DATABASE="{{ DB_DATABASE }}"'
+      - 'postgres_version="{{ postgres_version }}"'
+      become: yes
+
+    - name: Source /etc/environment
+      shell: |
+        . /etc/environment
+      args:
+        executable: /bin/bash
+
+    -  name: Print a simple message
+       debug:
+       msg: "You can start bot manually: /opt/venv/bin/python3 /opt/bot_data/bot_image/tgbotpg.py"
