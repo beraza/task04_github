@@ -284,6 +284,6 @@
       args:
         executable: /bin/bash
 
-    -  name: Print a simple message
-       debug:
-       msg: "You can start bot manually: /opt/venv/bin/python3 /opt/bot_data/ansible/tgbotpg.py"
+    - name: Print a simple message
+      debug:
+      msg: "You can start bot manually: /opt/venv/bin/python3 /opt/bot_data/ansible/tgbotpg.py"
