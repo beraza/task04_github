@@ -256,7 +256,7 @@
 
     - name: Install bot dependencies
       pip:
-        requirements: "/opt/bot_data/bot_image/requirements.txt"
+        requirements: "/opt/bot_data/ansible/requirements.txt"
         virtualenv: "/opt/venv"
 
     - name: Insert environment variables
@@ -286,4 +286,4 @@
 
     -  name: Print a simple message
        debug:
-       msg: "You can start bot manually: /opt/venv/bin/python3 /opt/bot_data/bot_image/tgbotpg.py"
+       msg: "You can start bot manually: /opt/venv/bin/python3 /opt/bot_data/ansible/tgbotpg.py"
