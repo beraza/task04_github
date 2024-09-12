@@ -259,7 +259,7 @@
       git:
         repo: "{{ BOT_REPO_URL }}"
         dest: "/opt/bot_data/"
-        version: docker
+        version: ansible
 
     - name: Install bot dependencies
       pip:
