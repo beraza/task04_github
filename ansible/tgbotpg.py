@@ -49,7 +49,7 @@ def ssh_connect(command):
 def pg_connect(query, update: Update, fetch=False):
     logger.debug(f'Query for PG: "{query}"')
     try:
-        connection = psycopg2.connect(db_user, db_password, db_host, db_port, db_database)
+        connection = psycopg2.connect(user=db_user, password=db_password, host=db_host, port=db_port, database=db_database)
         cursor = connection.cursor()
         cursor.execute(query)
         if fetch:
@@ -207,10 +207,10 @@ def get_services(update: Update, context: CallbackContext):
 
 def get_repl_logs(update: Update, context: CallbackContext):
     shell_script = """
-    if [[ -f "/pg_logs/postgresql.log" ]]; then
+    if [ -f "/pg_logs/postgresql.log" ]; then
         grep -i repl /pg_logs/postgresql.log
     else
-        sudo grep -i repl /var/log/postgresql/postgresql-15-main.log
+        /usr/bin/sudo grep -i repl /var/log/postgresql/postgresql-15-main.log
     fi
     """
     data = subprocess.run(shell_script, shell=True, text=True, capture_output=True)
