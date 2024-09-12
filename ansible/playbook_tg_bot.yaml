@@ -252,6 +252,9 @@
         state: present
         update_cache: yes
 
+    - name: Create a virtual environment
+      command: python3 -m venv {{ venv_path }}
+
     - name: Clone bot repository
       git:
         repo: "{{ BOT_REPO_URL }}"
