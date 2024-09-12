@@ -231,7 +231,7 @@
         enabled: yes
 
 - name: Setup TG Bot
-  hosts: master
+  hosts: tg_bot
   become: yes
   vars_files:
     - .env
